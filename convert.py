@@ -17,8 +17,11 @@ def go():
     import_users(conn)
     import_badges(conn)
     import_posts(conn)
+    import_post_history(conn)
+    import_post_links(conn)
     import_votes(conn)
     import_comments(conn)
+    import_tags(conn)
     create_indexes(conn)
     conn.commit()
     conn.close()
@@ -46,44 +49,47 @@ def timestamp(ts):
     return ts.replace('T', ' ')
 
 def import_badges(conn):
-    tree = ET.parse('input/badges.xml')
+    tree = ET.parse('input/Badges.xml')
     rows = tree.getroot()
     for row in rows:
         attrs = row.attrib
-        cur = conn.execute('INSERT INTO badges(id, user_id, name, date) VALUES (?, ?, ?, ?)',
+        cur = conn.execute('INSERT INTO Badges(Id, UserId, Name, Date, Class, TagBased) VALUES (?, ?, ?, ?, ?, ?)',
                      [
                          int(attrs['Id']),
                          int(attrs['UserId']),
                          attrs['Name'],
                          timestamp(attrs['Date']),
+                         int(attrs['Class']),
+                         int(attrs['TagBased'] == 'True')
                      ])
 
 
 def import_users(conn):
-    tree = ET.parse('input/users.xml')
+    tree = ET.parse('input/Users.xml')
     rows = tree.getroot()
     for row in rows:
         attrs = row.attrib
-        cur = conn.execute('INSERT INTO users(id, reputation, creation_date, display_name, email_hash, last_access_date, location, about_me, views, upvotes, downvotes, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        # print(attrs)
+        cur = conn.execute('INSERT INTO Users(Id, Reputation, CreationDate, DisplayName, LastAccessDate, Location, AboutMe, Views, Upvotes, Downvotes, WebsiteUrl, AccountId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                      [
                          int(attrs['Id']),
                          int(attrs['Reputation']),
                          timestamp(attrs['CreationDate']),
                          attrs['DisplayName'],
-                         attrs['EmailHash'],
                          timestamp(attrs['LastAccessDate']),
                          attrs.get('Location', ''),
                          attrs.get('AboutMe', ''),
                          int(attrs['Views']),
                          int(attrs['UpVotes']),
                          int(attrs['DownVotes']),
-                         'https://www.gravatar.com/avatar/{}'.format(attrs['EmailHash'])
+                         attrs.get('WebsiteUrl', ''),
+                         None if 'AccountId' not in attrs else int(attrs['AccountId'])
                      ])
 
 def post_type(ptid):
     if ptid == 1: return 'question'
     if ptid == 2: return 'answer'
-    if ptid == 3: return 'wiki'
+    if ptid == 3: return 'orphaned-tag-wiki'
     if ptid == 4: return 'tag-wiki-excerpt'
     if ptid == 5: return 'tag-wiki'
     if ptid == 6: return 'moderation-nomination'
@@ -95,21 +101,21 @@ def tags(x):
     return json.dumps([tag.strip('>') for tag in x.split('<') if tag])
 
 def import_posts(conn):
-    tree = ET.parse('input/posts.xml')
+    tree = ET.parse('input/Posts.xml')
     rows = tree.getroot()
     for row in rows:
         attrs = row.attrib
-        cur = conn.execute('INSERT INTO posts(id, post_type, accepted_answer_id, parent_id, creation_date, community_owned_date, closed_date, score, views, body, owner_user_id, last_editor_user_id, last_edit_date, last_activity_date, title, tags, answers, comments, favorites) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        cur = conn.execute('INSERT INTO Posts(Id, PostTypeID, AcceptedAnswerId, ParentID, CreationDate, CommunityOwnedDate, ClosedDate, Score, ViewCount, Body, OwnerUserId, LastEditorUserId, LastEditDate, LastActivityDate, Title, Tags, AnswerCount, CommentCount, FavoriteCount, OwnerDisplayName, ContentLicense) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                      [
                          int(attrs['Id']),
-                         post_type(int(attrs['PostTypeId'])),
+                         int(attrs['PostTypeId']),
                          int(attrs['AcceptedAnswerId']) if 'AcceptedAnswerId' in attrs else None,
                          int(attrs['ParentId']) if 'ParentId' in attrs else None,
                          timestamp(attrs['CreationDate']),
                          timestamp(attrs['CommunityOwnedDate']) if 'CommunityOwnedDate' in attrs else None,
                          timestamp(attrs['ClosedDate']) if 'ClosedDate' in attrs else None,
                          int(attrs['Score']),
-                         int(attrs['ViewCount'] or '0'),
+                         int(attrs.get('ViewCount', 0)),
                          attrs['Body'],
                          int(attrs['OwnerUserId']) if 'OwnerUserId' in attrs else None,
                          int(attrs['LastEditorUserId']) if 'LastEditorUserId' in attrs else None,
@@ -120,7 +126,46 @@ def import_posts(conn):
                          int(attrs['AnswerCount']) if 'AnswerCount' in attrs else 0,
                          int(attrs['CommentCount']) if 'CommentCount' in attrs else 0,
                          int(attrs['FavoriteCount']) if 'FavoriteCount' in attrs else 0,
+                         attrs.get('OwnerDisplayName'),
+                         attrs['ContentLicense']
                      ])
+
+
+def import_post_history(conn):
+    tree = ET.parse('input/PostHistory.xml')
+    rows = tree.getroot()
+    for row in rows:
+        attrs = row.attrib
+        cur = conn.execute('INSERT INTO PostHistory(Id, PostHistoryTypeId, PostId, RevisionGUID, CreationDate, UserId, UserDisplayName, Comment, Text, ContentLicense) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                     [
+                         int(attrs['Id']),
+                         int(attrs['PostHistoryTypeId']),
+                         int(attrs['PostId']),
+                         attrs['RevisionGUID'],
+                         timestamp(attrs['CreationDate']),
+                         None if 'UserId' not in attrs else int(attrs['UserId']),
+                         attrs.get('UserDisplayName'),
+                         attrs.get('Comment'),
+                         attrs.get('Text', ''),
+                         attrs.get('ContentLicense', '')
+                     ])
+
+
+def import_post_links(conn):
+    tree = ET.parse('input/PostLinks.xml')
+    rows = tree.getroot()
+    for row in rows:
+        attrs = row.attrib
+        cur = conn.execute('INSERT INTO PostLinks(Id, CreationDate, PostId, RelatedPostId, LinkTypeId) VALUES (?, ?, ?, ?, ?)',
+                     [
+                         int(attrs['Id']),
+                         timestamp(attrs['CreationDate']),
+                         int(attrs['PostId']),
+                         int(attrs['RelatedPostId']),
+                         int(attrs['LinkTypeId'])
+                     ])
+
+
 
 def vote_type(vtid):
     if vtid == 1: return 'accepted'
@@ -135,21 +180,21 @@ def vote_type(vtid):
     if vtid == 10: return 'delete'
     if vtid == 11: return 'undelete'
     if vtid == 12: return 'spam'
-    if vtid == 15: return 'mod-view-flagged'
+    if vtid == 15: return 'mod-review'
     if vtid == 16: return 'edit-approved'
 
     raise Exception('unknown vtid {}'.format(vtid))
 
 def import_votes(conn):
-    tree = ET.parse('input/votes.xml')
+    tree = ET.parse('input/Votes.xml')
     rows = tree.getroot()
     for row in rows:
         attrs = row.attrib
-        cur = conn.execute('INSERT INTO votes(id, post_id, vote_type, creation_date, user_id, bounty_amount) VALUES (?, ?, ?, ?, ?, ?)',
+        cur = conn.execute('INSERT INTO Votes(Id, PostId, VoteTypeId, CreationDate, UserId, BountyAmount) VALUES (?, ?, ?, ?, ?, ?)',
                      [
                          int(attrs['Id']),
                          int(attrs['PostId']),
-                         vote_type(int(attrs['VoteTypeId'])),
+                         int(attrs['VoteTypeId']),
                          timestamp(attrs['CreationDate']),
                          int(attrs['UserId']) if 'UserId' in attrs else None,
                          int(attrs['BountyAmount']) if 'BountyAmount' in attrs else None
@@ -157,22 +202,40 @@ def import_votes(conn):
 
 
 def import_comments(conn):
-    tree = ET.parse('input/comments.xml')
+    tree = ET.parse('input/Comments.xml')
     rows = tree.getroot()
     for row in rows:
         attrs = row.attrib
 
         # 487 of 19,651 rows lack a user id, skip em.
-        if not 'UserId' in attrs:
-            continue
-        cur = conn.execute('INSERT INTO comments(id, post_id, score, text, creation_date, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+        # if not 'UserId' in attrs:
+        #     continue
+        cur = conn.execute('INSERT INTO Comments(Id, PostId, Score, Text, CreationDate, UserId, UserDisplayName, ContentLicense) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                      [
                          int(attrs['Id']),
                          int(attrs['PostId']),
                          int(attrs.get('Score', 0)),
                          attrs['Text'],
                          timestamp(attrs['CreationDate']),
-                         int(attrs['UserId']),
+                         None if 'UserId' not in attrs else int(attrs['UserId']),
+                         None if 'UserDisplayName' not in attrs else attrs['UserDisplayName'],
+                         attrs['ContentLicense']
+                     ])
+
+def import_tags(conn):
+    tree = ET.parse('input/Tags.xml')
+    rows = tree.getroot()
+    for row in rows:
+        attrs = row.attrib
+        cur = conn.execute('INSERT INTO Tags(Id, TagName, Count, ExcerptPostId, WikiPostId, IsModeratorOnly, IsRequired) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                     [
+                         int(attrs['Id']),
+                         attrs['TagName'],
+                         int(attrs['Count']),
+                         None if 'ExcerptPostId' not in attrs else int(attrs['ExcerptPostId']),
+                         None if 'WikiPostId' not in attrs else int(attrs['WikiPostId']),
+                         int(attrs.get("IsModeratorOnly") == 'True'),
+                         int(attrs.get("IsRequired") == 'True'),
                      ])
 
 if __name__ == '__main__':
